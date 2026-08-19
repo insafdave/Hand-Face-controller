@@ -103,6 +103,17 @@ REQUIRED_FRAMES = 8
 
 
 # ==========================================
+# Gesture Smoothing
+# ==========================================
+
+gesture_history = []
+
+HISTORY_SIZE = 7
+
+gesture_confidence = 0.0
+
+
+# ==========================================
 # Mode Lock
 # ==========================================
 
@@ -139,7 +150,7 @@ DRAG_DELAY = 0.35
 
 
 # ==========================================
-# Face
+# Face Direction
 # ==========================================
 
 def get_head_direction(face):
@@ -178,14 +189,16 @@ def distance(point1, point2):
 
 
 # ==========================================
-# Fingers
+# Fingers Up
 # ==========================================
 
 def fingers_up(hand, handedness):
 
     fingers = []
 
+    # --------------------------------------
     # Thumb
+    # --------------------------------------
 
     if handedness == "Right":
 
@@ -201,33 +214,46 @@ def fingers_up(hand, handedness):
         else:
             fingers.append(0)
 
+
+    # --------------------------------------
     # Index
+    # --------------------------------------
 
     fingers.append(
         1 if hand[8].y < hand[6].y
         else 0
     )
 
+
+    # --------------------------------------
     # Middle
+    # --------------------------------------
 
     fingers.append(
         1 if hand[12].y < hand[10].y
         else 0
     )
 
+
+    # --------------------------------------
     # Ring
+    # --------------------------------------
 
     fingers.append(
         1 if hand[16].y < hand[14].y
         else 0
     )
 
+
+    # --------------------------------------
     # Pinky
+    # --------------------------------------
 
     fingers.append(
         1 if hand[20].y < hand[18].y
         else 0
     )
+
 
     return fingers
 
@@ -249,81 +275,107 @@ def detect_gesture(hand, handedness):
     ring = fingers[3]
     pinky = fingers[4]
 
-    # FIST
 
-    if [
-        thumb,
-        index,
-        middle,
-        ring,
+    # ======================================
+    # Count Raised Fingers
+    # ======================================
+
+    raised = (
+        thumb +
+        index +
+        middle +
+        ring +
         pinky
-    ] == [0, 0, 0, 0, 0]:
+    )
+
+
+    # ======================================
+    # FIST
+    # ======================================
+
+    if raised == 0:
 
         return "FIST"
 
-    # THUMBS UP
 
-    if [
-        thumb,
-        index,
-        middle,
-        ring,
-        pinky
-    ] == [1, 0, 0, 0, 0]:
+    # ======================================
+    # OPEN PALM
+    # ======================================
 
-        return "THUMBS UP"
+    if raised == 5:
 
+        return "OPEN PALM"
+
+
+    # ======================================
     # ONE
+    # ======================================
 
-    if [
-        thumb,
-        index,
-        middle,
-        ring,
-        pinky
-    ] == [0, 1, 0, 0, 0]:
+    if (
+        index == 1
+        and middle == 0
+        and ring == 0
+        and pinky == 0
+        and thumb == 0
+    ):
 
         return "ONE"
 
-    # PEACE
 
-    if [
-        index,
-        middle,
-        ring,
-        pinky
-    ] == [1, 1, 0, 0]:
+    # ======================================
+    # PEACE
+    # ======================================
+
+    if (
+        index == 1
+        and middle == 1
+        and ring == 0
+        and pinky == 0
+    ):
 
         return "PEACE"
 
-    # THREE
 
-    if [
-        index,
-        middle,
-        ring,
-        pinky
-    ] == [1, 1, 1, 0]:
+    # ======================================
+    # THREE
+    # ======================================
+
+    if (
+        index == 1
+        and middle == 1
+        and ring == 1
+        and pinky == 0
+    ):
 
         return "THREE"
 
-    # OPEN PALM
 
-    if [
-        thumb,
-        index,
-        middle,
-        ring,
-        pinky
-    ] == [1, 1, 1, 1, 1]:
+    # ======================================
+    # THUMBS UP
+    # ======================================
 
-        return "OPEN PALM"
+    if (
+        thumb == 1
+        and index == 0
+        and middle == 0
+        and ring == 0
+        and pinky == 0
+    ):
+
+        if hand[4].y < hand[3].y:
+
+            return "THUMBS UP"
+
+
+    # ======================================
+    # Unknown
+    # ======================================
 
     return "UNKNOWN"
 
 
 # ==========================================
-# Stable Gesture
+# Gesture Smoothing
 # ==========================================
 
 def update_stable_gesture(raw_gesture):
@@ -331,6 +383,31 @@ def update_stable_gesture(raw_gesture):
     global previous_gesture
     global stable_gesture
     global gesture_frames
+    global gesture_history
+    global gesture_confidence
+
+
+    # ======================================
+    # Add gesture to history
+    # ======================================
+
+    gesture_history.append(
+        raw_gesture
+    )
+
+
+    # ======================================
+    # Limit history size
+    # ======================================
+
+    if len(gesture_history) > HISTORY_SIZE:
+
+        gesture_history.pop(0)
+
+
+    # ======================================
+    # Frame counter
+    # ======================================
 
     if raw_gesture == previous_gesture:
 
@@ -339,11 +416,52 @@ def update_stable_gesture(raw_gesture):
     else:
 
         previous_gesture = raw_gesture
+
         gesture_frames = 1
 
-    if gesture_frames >= REQUIRED_FRAMES:
 
-        stable_gesture = raw_gesture
+    # ======================================
+    # Majority vote
+    # ======================================
+
+    if len(gesture_history) >= HISTORY_SIZE:
+
+        counts = {}
+
+        for gesture in gesture_history:
+
+            if gesture not in counts:
+
+                counts[gesture] = 0
+
+            counts[gesture] += 1
+
+
+        most_common = max(
+            counts,
+            key=counts.get
+        )
+
+
+        confidence = (
+            counts[most_common] /
+            len(gesture_history)
+        )
+
+
+        gesture_confidence = confidence
+
+
+        # ==================================
+        # 70% confidence required
+        # ==================================
+
+        if confidence >= 0.70:
+
+            stable_gesture = (
+                most_common
+            )
+
 
     return stable_gesture
 
@@ -358,19 +476,24 @@ def change_mode():
     global current_mode
     global current_action
 
+
     current_mode_index += 1
+
 
     if current_mode_index >= len(modes):
 
         current_mode_index = 0
 
+
     current_mode = modes[
         current_mode_index
     ]
 
+
     current_action = (
         f"MODE → {current_mode}"
     )
+
 
     print(
         f"MODE CHANGED → {current_mode}"
@@ -385,6 +508,7 @@ def handle_mode_control(gesture):
 
     global mode_locked
 
+
     if gesture == "ONE":
 
         if not mode_locked:
@@ -394,6 +518,7 @@ def handle_mode_control(gesture):
             mode_locked = True
 
         return
+
 
     if gesture != "ONE":
 
@@ -415,8 +540,15 @@ def mouse_controller(hand):
     global pinch_start_time
     global current_action
 
+
     index_tip = hand[8]
+
     thumb_tip = hand[4]
+
+
+    # --------------------------------------
+    # Target position
+    # --------------------------------------
 
     target_x = (
         index_tip.x *
@@ -428,6 +560,11 @@ def mouse_controller(hand):
         screen_height
     )
 
+
+    # --------------------------------------
+    # Smooth movement
+    # --------------------------------------
+
     mouse_x = (
         previous_mouse_x +
         (
@@ -436,6 +573,7 @@ def mouse_controller(hand):
         ) *
         smooth_factor
     )
+
 
     mouse_y = (
         previous_mouse_y +
@@ -446,15 +584,26 @@ def mouse_controller(hand):
         smooth_factor
     )
 
+
+    # --------------------------------------
+    # Pinch distance
+    # --------------------------------------
+
     pinch_distance = distance(
         thumb_tip,
         index_tip
     )
 
+
     is_pinching = (
         pinch_distance <
         PINCH_THRESHOLD
     )
+
+
+    # --------------------------------------
+    # Move cursor
+    # --------------------------------------
 
     if not is_pinching:
 
@@ -467,6 +616,11 @@ def mouse_controller(hand):
         previous_mouse_x = mouse_x
         previous_mouse_y = mouse_y
 
+
+    # --------------------------------------
+    # Pinch start
+    # --------------------------------------
+
     if (
         is_pinching
         and not pinching
@@ -475,6 +629,11 @@ def mouse_controller(hand):
         pinching = True
 
         pinch_start_time = time.time()
+
+
+    # --------------------------------------
+    # Pinch hold
+    # --------------------------------------
 
     if (
         is_pinching
@@ -485,6 +644,7 @@ def mouse_controller(hand):
             time.time() -
             pinch_start_time
         )
+
 
         if (
             hold_time >= DRAG_DELAY
@@ -499,6 +659,11 @@ def mouse_controller(hand):
                 "MOUSE → DRAGGING"
             )
 
+
+    # --------------------------------------
+    # Continue drag
+    # --------------------------------------
+
     if (
         is_pinching
         and dragging
@@ -510,12 +675,18 @@ def mouse_controller(hand):
             duration=0
         )
 
+
+    # --------------------------------------
+    # Release
+    # --------------------------------------
+
     if (
         not is_pinching
         and pinching
     ):
 
         pinching = False
+
 
         if not dragging:
 
@@ -524,6 +695,7 @@ def mouse_controller(hand):
             current_action = (
                 "MOUSE → LEFT CLICK"
             )
+
 
         else:
 
@@ -534,6 +706,7 @@ def mouse_controller(hand):
             current_action = (
                 "MOUSE → DROP"
             )
+
 
     return (
         is_pinching,
@@ -553,7 +726,9 @@ def keyboard_controller(
     global last_action_time
     global current_action
 
+
     now = time.time()
+
 
     if (
         now - last_action_time
@@ -562,9 +737,16 @@ def keyboard_controller(
 
         return
 
+
+    # ======================================
+    # ENTER
+    # ======================================
+
     if gesture == "THUMBS UP":
 
-        pyautogui.press("enter")
+        pyautogui.press(
+            "enter"
+        )
 
         current_action = (
             "KEYBOARD → ENTER"
@@ -572,9 +754,16 @@ def keyboard_controller(
 
         last_action_time = now
 
+
+    # ======================================
+    # SPACE
+    # ======================================
+
     elif gesture == "PEACE":
 
-        pyautogui.press("space")
+        pyautogui.press(
+            "space"
+        )
 
         current_action = (
             "KEYBOARD → SPACE"
@@ -582,9 +771,16 @@ def keyboard_controller(
 
         last_action_time = now
 
+
+    # ======================================
+    # BACKSPACE
+    # ======================================
+
     elif gesture == "FIST":
 
-        pyautogui.press("backspace")
+        pyautogui.press(
+            "backspace"
+        )
 
         current_action = (
             "KEYBOARD → BACKSPACE"
@@ -592,12 +788,19 @@ def keyboard_controller(
 
         last_action_time = now
 
+
+    # ======================================
+    # LEFT
+    # ======================================
+
     elif (
         gesture == "THREE"
         and head == "LEFT"
     ):
 
-        pyautogui.press("left")
+        pyautogui.press(
+            "left"
+        )
 
         current_action = (
             "KEYBOARD → LEFT"
@@ -605,12 +808,19 @@ def keyboard_controller(
 
         last_action_time = now
 
+
+    # ======================================
+    # RIGHT
+    # ======================================
+
     elif (
         gesture == "THREE"
         and head == "RIGHT"
     ):
 
-        pyautogui.press("right")
+        pyautogui.press(
+            "right"
+        )
 
         current_action = (
             "KEYBOARD → RIGHT"
@@ -620,7 +830,7 @@ def keyboard_controller(
 
 
 # ==========================================
-# MEDIA CONTROLLER
+# Media Controller
 # ==========================================
 
 def media_controller(gesture):
@@ -628,7 +838,9 @@ def media_controller(gesture):
     global last_action_time
     global current_action
 
+
     now = time.time()
+
 
     if (
         now - last_action_time
@@ -637,8 +849,9 @@ def media_controller(gesture):
 
         return
 
+
     # ======================================
-    # THUMBS UP
+    # PLAY / PAUSE
     # ======================================
 
     if gesture == "THUMBS UP":
@@ -653,13 +866,9 @@ def media_controller(gesture):
 
         last_action_time = now
 
-        print(
-            "MEDIA → PLAY / PAUSE"
-        )
-
 
     # ======================================
-    # PEACE
+    # NEXT
     # ======================================
 
     elif gesture == "PEACE":
@@ -674,13 +883,9 @@ def media_controller(gesture):
 
         last_action_time = now
 
-        print(
-            "MEDIA → NEXT TRACK"
-        )
-
 
     # ======================================
-    # FIST
+    # PREVIOUS
     # ======================================
 
     elif gesture == "FIST":
@@ -695,13 +900,9 @@ def media_controller(gesture):
 
         last_action_time = now
 
-        print(
-            "MEDIA → PREVIOUS TRACK"
-        )
-
 
     # ======================================
-    # OPEN PALM
+    # MUTE
     # ======================================
 
     elif gesture == "OPEN PALM":
@@ -716,10 +917,6 @@ def media_controller(gesture):
 
         last_action_time = now
 
-        print(
-            "MEDIA → MUTE / UNMUTE"
-        )
-
 
 # ==========================================
 # Main Loop
@@ -729,6 +926,7 @@ while True:
 
     success, frame = camera.read()
 
+
     if not success:
 
         print(
@@ -737,12 +935,19 @@ while True:
 
         break
 
+
+    # ======================================
+    # Mirror
+    # ======================================
+
     frame = cv2.flip(
         frame,
         1
     )
 
+
     height, width, _ = frame.shape
+
 
     # ======================================
     # RGB
@@ -753,15 +958,18 @@ while True:
         cv2.COLOR_BGR2RGB
     )
 
+
     mp_image = mp.Image(
         image_format=mp.ImageFormat.SRGB,
         data=rgb_frame
     )
 
+
     timestamp += 1
 
+
     # ======================================
-    # Face
+    # Face Detection
     # ======================================
 
     face_result = (
@@ -771,8 +979,9 @@ while True:
         )
     )
 
+
     # ======================================
-    # Hand
+    # Hand Detection
     # ======================================
 
     hand_result = (
@@ -782,6 +991,7 @@ while True:
         )
     )
 
+
     # ======================================
     # Defaults
     # ======================================
@@ -790,11 +1000,10 @@ while True:
 
     raw_gesture = "NONE"
 
-    stable_gesture = "NONE"
-
     is_pinching = False
 
     pinch_distance = 0
+
 
     # ======================================
     # Face Processing
@@ -806,9 +1015,11 @@ while True:
             face_result.face_landmarks[0]
         )
 
+
         head = get_head_direction(
             face
         )
+
 
         for landmark in face:
 
@@ -822,6 +1033,7 @@ while True:
                 height
             )
 
+
             cv2.circle(
                 frame,
                 (x, y),
@@ -829,6 +1041,7 @@ while True:
                 (255, 0, 255),
                 -1
             )
+
 
     # ======================================
     # Hand Processing
@@ -840,15 +1053,18 @@ while True:
             hand_result.hand_landmarks[0]
         )
 
+
         handedness = (
             hand_result.handedness[0][0]
             .category_name
         )
 
+
         raw_gesture = detect_gesture(
             hand,
             handedness
         )
+
 
         stable_gesture = (
             update_stable_gesture(
@@ -856,7 +1072,10 @@ while True:
             )
         )
 
-        # Draw hand
+
+        # ==================================
+        # Draw hand landmarks
+        # ==================================
 
         for landmark in hand:
 
@@ -870,6 +1089,7 @@ while True:
                 height
             )
 
+
             cv2.circle(
                 frame,
                 (x, y),
@@ -878,13 +1098,15 @@ while True:
                 -1
             )
 
+
         # ==================================
-        # Mode
+        # Mode Control
         # ==================================
 
         handle_mode_control(
             stable_gesture
         )
+
 
         # ==================================
         # MOUSE
@@ -899,6 +1121,7 @@ while True:
                 hand
             )
 
+
         # ==================================
         # KEYBOARD
         # ==================================
@@ -911,10 +1134,12 @@ while True:
 
                 dragging = False
 
+
             keyboard_controller(
                 stable_gesture,
                 head
             )
+
 
         # ==================================
         # MEDIA
@@ -928,9 +1153,11 @@ while True:
 
                 dragging = False
 
+
             media_controller(
                 stable_gesture
             )
+
 
     else:
 
@@ -946,15 +1173,21 @@ while True:
 
         gesture_frames = 0
 
+        gesture_history.clear()
+
+        gesture_confidence = 0.0
+
         mode_locked = False
 
         pinching = False
+
 
         if dragging:
 
             pyautogui.mouseUp()
 
             dragging = False
+
 
     # ======================================
     # UI
@@ -970,6 +1203,7 @@ while True:
         2
     )
 
+
     cv2.putText(
         frame,
         f"Raw: {raw_gesture}",
@@ -979,6 +1213,7 @@ while True:
         (255, 255, 255),
         2
     )
+
 
     cv2.putText(
         frame,
@@ -990,6 +1225,7 @@ while True:
         2
     )
 
+
     cv2.putText(
         frame,
         f"Frames: {gesture_frames}/{REQUIRED_FRAMES}",
@@ -1000,15 +1236,32 @@ while True:
         2
     )
 
+
+    cv2.putText(
+        frame,
+        f"Confidence: {gesture_confidence * 100:.0f}%",
+        (20, 185),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.65,
+        (255, 255, 255),
+        2
+    )
+
+
     cv2.putText(
         frame,
         f"Head: {head}",
-        (20, 185),
+        (20, 220),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.65,
         (255, 0, 255),
         2
     )
+
+
+    # ======================================
+    # Mode Status
+    # ======================================
 
     if current_mode == "MOUSE":
 
@@ -1024,23 +1277,31 @@ while True:
 
             status = "MOUSE ACTIVE"
 
+
     elif current_mode == "KEYBOARD":
 
         status = "KEYBOARD ACTIVE"
+
 
     else:
 
         status = "MEDIA ACTIVE"
 
+
     cv2.putText(
         frame,
         status,
-        (20, 225),
+        (20, 260),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.75,
         (0, 255, 255),
         2
     )
+
+
+    # ======================================
+    # Current Action
+    # ======================================
 
     cv2.putText(
         frame,
@@ -1052,14 +1313,16 @@ while True:
         2
     )
 
+
     # ======================================
-    # Show
+    # Display
     # ======================================
 
     cv2.imshow(
         "AI Multi Mode Controller",
         frame
     )
+
 
     # ======================================
     # Q = Quit
@@ -1077,6 +1340,7 @@ while True:
 if dragging:
 
     pyautogui.mouseUp()
+
 
 face_landmarker.close()
 
